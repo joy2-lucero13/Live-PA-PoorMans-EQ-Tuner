@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Live PA Sound Tech Coach - Optimized RTA</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg-dark: #121417;
+      --card-bg: #1e2228;
+      --accent: #00d1b2;
+      --accent-warn: #ffdd57;
+      --accent-danger: #f14668;
+      --accent-blue: #3273dc;
+      --text: #e0e6ed;
+      --border: #2e353f;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text);
+      padding: 15px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 10px;
+      margin-bottom: 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.2rem;
+      color: var(--accent);
+    }
+
+    .status-badge {
+      font-size: 0.75rem;
+      padding: 4px 8px;
+      border-radius: 12px;
+      background: #2b313a;
+      color: #9aa8b6;
+    }
+
+    .status-badge.active { background: rgba(0, 209, 178, 0.2); color: var(--accent); border: 1px solid var(--accent); }
+    .status-badge.playing { background: rgba(255, 221, 87, 0.2); color: var(--accent-warn); border: 1px solid var(--accent-warn); }
+
+    .controls-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 10px;
+      margin-bottom: 15px;
+    }
+
+    .control-card {
+      background: var(--card-bg);
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    label {
+      display: block;
+      font-size: 0.75rem;
+      margin-bottom: 5px;
+      color: #9aa8b6;
+    }
+
+    select, button, input[type="text"] {
+      width: 100%;
+      padding: 10px;
+      background: #14171c;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 4px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      box-sizing: border-box;
+    }
+
+    button.primary { background: var(--accent); color: #121417; font-weight: bold; border: none; }
+    button.pink { background: #e91e63; color: #ffffff; font-weight: bold; border: none; }
+    button.danger { background: var(--accent-danger); color: #ffffff; font-weight: bold; border: none; }
+    button.blue { background: var(--accent-blue); color: #ffffff; font-weight: bold; border: none; }
+
+    .chart-container {
+      background: var(--card-bg);
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      margin-bottom: 15px;
+      height: 380px;
+      position: relative;
+    }
+
+    .snapshot-bar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 15px;
+      background: var(--card-bg);
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+
+    .snapshot-tags {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      width: 100%;
+      margin-top: 5px;
+    }
+
+    .snap-badge {
+      background: #14171c;
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .snap-badge .remove-btn { color: var(--accent-danger); cursor: pointer; font-weight: bold; }
+
+    .toggle-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: #9aa8b6;
+      cursor: pointer;
+    }
+
+    .coach-panel {
+      background: var(--card-bg);
+      padding: 15px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    .coach-title { font-size: 1rem; font-weight: bold; margin-bottom: 8px; }
+
+    .suggestions-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .suggestion-card {
+      background: #14171c;
+      padding: 10px;
+      border-left: 4px solid var(--accent);
+      border-radius: 4px;
+      font-size: 0.85rem;
+    }
+
+    .suggestion-card.cut { border-left-color: var(--accent-danger); }
+    .suggestion-card.boost { border-left-color: var(--accent-warn); }
+
+    .freq-tag { font-weight: bold; font-size: 0.95rem; }
+    .db-change { float: right; font-family: monospace; font-weight: bold; }
+    .note { font-size: 0.75rem; color: #7a8b9e; margin-top: 4px; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <h1>🔊 Live PA EQ Tuner</h1>
+    <span id="statusBadge" class="status-badge">System Idle</span>
+  </header>
+
+  <div class="controls-grid">
+    <div class="control-card">
+      <label>Device 1: Output</label>
+      <button id="pinkBtn" class="pink">Play Pink Noise</button>
+    </div>
+
+    <div class="control-card">
+      <label>Device 2: Input</label>
+      <button id="micBtn" class="primary">Start Mic RTA</button>
+    </div>
+
+    <div class="control-card">
+      <label for="eqSelect">Hardware EQ</label>
+      <select id="eqSelect">
+        <option value="231">dbx 231 (31-Band)</option>
+        <option value="215" selected>dbx 215 (15-Band)</option>
+      </select>
+    </div>
+
+    <div class="control-card">
+      <label for="curveSelect">Target Curve</label>
+      <select id="curveSelect">
+        <option value="flat">Flat Response</option>
+        <option value="house" selected>Live House Curve</option>
+        <option value="vocal">Vocal Clarity</option>
+      </select>
+    </div>
+
+    <div class="control-card">
+      <label for="smoothSelect">Averaging Speed</label>
+      <select id="smoothSelect">
+        <option value="3">Fast (Responsive)</option>
+        <option value="8" selected>Medium (Recommended)</option>
+        <option value="16">Slow (Very Smooth)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="snapshot-bar">
+    <div style="flex: 1; min-width: 180px;">
+      <input type="text" id="snapLabel" placeholder="Snapshot Label (e.g., Pre-EQ Baseline)">
+    </div>
+    <div style="width: 140px;">
+      <button id="snapBtn" class="blue">Save Snapshot</button>
+    </div>
+    <div style="margin-left: auto;">
+      <label class="toggle-bar">
+        <input type="checkbox" id="showBarsToggle" checked> Show Guidance Bars
+      </label>
+    </div>
+    <div class="snapshot-tags" id="snapshotTagsContainer"></div>
+  </div>
+
+  <div class="chart-container">
+    <canvas id="eqChart"></canvas>
+  </div>
+
+  <div class="coach-panel">
+    <div class="coach-title">💡 Fader Adjustments</div>
+    <div class="suggestions-list" id="suggestionsContainer">
+      <p style="color: #7a8b9e; margin:0;">Tap "Start Mic RTA" to enable real-time coaching.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  const ISO_31_BANDS = [20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000];
+  const ISO_15_BANDS = [25, 40, 63, 100, 160, 250, 400, 630, 1000, 1600, 2500, 4000, 6300, 10000, 16000];
+  const SNAP_COLORS = ['#3273dc', '#9b59b6', '#e67e22', '#1abc9c', '#f39c12'];
+
+  let genCtx = null;
+  let pinkNode = null;
+  let isPlayingPink = false;
+
+  let micCtx = null;
+  let analyser = null;
+  let micStream = null;
+  let isAnalyzing = false;
+  let animationFrameId = null;
+  let chart = null;
+
+  let currentLiveRTA = [];
+  let savedSnapshots = [];
+  let frameBuffer = [];
+
+  function formatFreq(f) {
+    return f >= 1000 ? (f / 1000).toFixed(f % 1000 === 0 ? 0 : 1) + 'kHz' : f + 'Hz';
+  }
+
+  function getActiveFreqs() {
+    return document.getElementById('eqSelect').value === '231' ? ISO_31_BANDS : ISO_15_BANDS;
+  }
+
+  function togglePinkNoise() {
+    const btn = document.getElementById('pinkBtn');
+    const badge = document.getElementById('statusBadge');
+
+    if (isPlayingPink) {
+      if (pinkNode) pinkNode.disconnect();
+      if (genCtx) genCtx.close();
+      isPlayingPink = false;
+      btn.innerText = 'Play Pink Noise';
+      btn.className = 'pink';
+      if (!isAnalyzing) {
+        badge.innerText = 'System Idle';
+        badge.className = 'status-badge';
+      }
+      return;
+    }
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    genCtx = new AudioContextClass();
+    if (genCtx.state === 'suspended') genCtx.resume();
+
+    const bufferSize = 3 * genCtx.sampleRate;
+    const noiseBuffer = genCtx.createBuffer(1, bufferSize, genCtx.sampleRate);
+    const output = noiseBuffer.getChannelData(0);
+    
+    let b0=0, b1=0, b2=0, b3=0, b4=0, b5=0, b6=0;
+    for (let i = 0; i < bufferSize; i++) {
+      const white = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + white * 0.0555179;
+      b1 = 0.99332 * b1 + white * 0.0750759;
+      b2 = 0.96900 * b2 + white * 0.1538520;
+      b3 = 0.86650 * b3 + white * 0.3104856;
+      b4 = 0.55000 * b4 + white * 0.5329522;
+      b5 = -0.7616 * b5 - white * 0.0168980;
+      output[i] = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
+      output[i] *= 0.11;
+      b6 = white * 0.115926;
+    }
+
+    pinkNode = genCtx.createBufferSource();
+    pinkNode.buffer = noiseBuffer;
+    pinkNode.loop = true;
+    pinkNode.connect(genCtx.destination);
+    pinkNode.start();
+
+    isPlayingPink = true;
+    btn.innerText = 'Stop Pink Noise';
+    btn.className = 'danger';
+    badge.innerText = '🔊 Playing Pink Noise';
+    badge.className = 'status-badge playing';
+  }
+
+  function getTargetCurve(freqs, type) {
+    return freqs.map(f => {
+      if (type === 'flat') return 0;
+      if (type === 'house') {
+        if (f <= 100) return 6 - (f / 100) * 2;
+        if (f >= 4000) return -((Math.log2(f / 4000)) * 2);
+        return 2;
+      }
+      if (type === 'vocal') {
+        if (f < 80) return -12;
+        if (f >= 2000 && f <= 5000) return 3;
+        return 0;
+      }
+      return 0;
+    });
+  }
+
+  async function toggleMicrophone() {
+    const btn = document.getElementById('micBtn');
+    const badge = document.getElementById('statusBadge');
+
+    if (isAnalyzing) {
+      stopMicrophone();
+      btn.innerText = 'Start Mic RTA';
+      btn.className = 'primary';
+      if (!isPlayingPink) {
+        badge.innerText = 'System Idle';
+        badge.className = 'status-badge';
+      }
+      updateBandConfig();
+      return;
+    }
+
+    try {
+      if (!navigator.mediaDevices) navigator.mediaDevices = {};
+      if (!navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia = function(constraints) {
+          const getUserMedia = navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
+          if (!getUserMedia) return Promise.reject(new Error('getUserMedia is not supported'));
+          return new Promise((resolve, reject) => {
+            getUserMedia.call(navigator, constraints, resolve, reject);
+          });
+        };
+      }
+
+      micStream = await navigator.mediaDevices.getUserMedia({ 
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }, 
+        video: false 
+      });
+
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      micCtx = new AudioContextClass();
+      if (micCtx.state === 'suspended') await micCtx.resume();
+
+      const source = micCtx.createMediaStreamSource(micStream);
+      analyser = micCtx.createAnalyser();
+      analyser.fftSize = 4096;
+      analyser.smoothingTimeConstant = 0.92;
+      
+      source.connect(analyser);
+      isAnalyzing = true;
+      frameBuffer = [];
+
+      btn.innerText = 'Stop Mic RTA';
+      btn.className = 'danger';
+      badge.innerText = '🎙️ RTA Active';
+      badge.className = 'status-badge active';
+
+      processAudioFrame();
+    } catch (err) {
+      alert('Microphone Access Error: ' + err.message);
+    }
+  }
+
+  function stopMicrophone() {
+    isAnalyzing = false;
+    if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    if (micStream) micStream.getTracks().forEach(t => t.stop());
+    if (micCtx) micCtx.close();
+    frameBuffer = [];
+  }
+
+  function processAudioFrame() {
+    if (!isAnalyzing || !analyser) return;
+
+    const freqs = getActiveFreqs();
+    const fftData = new Float32Array(analyser.frequencyBinCount);
+    analyser.getFloatFrequencyData(fftData);
+
+    const sampleRate = micCtx.sampleRate;
+    const binWidth = sampleRate / analyser.fftSize;
+
+    const rawFrame = freqs.map(centerFreq => {
+      const bandwidthRatio = document.getElementById('eqSelect').value === '231' ? 0.23 : 0.46;
+      const lower = centerFreq * (1 - bandwidthRatio);
+      const upper = centerFreq * (1 + bandwidthRatio);
+
+      const startBin = Math.max(0, Math.floor(lower / binWidth));
+      const endBin = Math.min(fftData.length - 1, Math.ceil(upper / binWidth));
+
+      let sumPower = 0;
+      let count = 0;
+
+      for (let i = startBin; i <= endBin; i++) {
+        sumPower += Math.pow(10, fftData[i] / 10);
+        count++;
+      }
+
+      const avgPower = count > 0 ? sumPower / count : 1e-12;
+      let dbVal = 10 * Math.log10(avgPower) + 80;
+      return Math.max(-20, Math.min(20, dbVal));
+    });
+
+    const maxHistoryFrames = parseInt(document.getElementById('smoothSelect').value, 10);
+    frameBuffer.push(rawFrame);
+
+    if (frameBuffer.length > maxHistoryFrames) {
+      frameBuffer.shift();
+    }
+
+    currentLiveRTA = freqs.map((_, bandIdx) => {
+      let bandSum = 0;
+      for (let f = 0; f < frameBuffer.length; f++) {
+        bandSum += frameBuffer[f][bandIdx];
+      }
+      return bandSum / frameBuffer.length;
+    });
+
+    const targetCurve = getTargetCurve(freqs, document.getElementById('curveSelect').value);
+    
+    const adjustments = targetCurve.map((target, i) => {
+      const diff = target - currentLiveRTA[i];
+      return Math.round(diff * 2) / 2;
+    });
+
+    updateChartData(freqs, currentLiveRTA, targetCurve, adjustments);
+    renderSuggestions(freqs, adjustments);
+
+    animationFrameId = requestAnimationFrame(processAudioFrame);
+  }
+
+  function saveSnapshot() {
+    if (currentLiveRTA.length === 0) {
+      alert('Please start Mic RTA first to capture a reading.');
+      return;
+    }
+
+    if (savedSnapshots.length >= 5) {
+      alert('Maximum 5 snapshots allowed. Please remove one before adding a new reading.');
+      return;
+    }
+
+    const input = document.getElementById('snapLabel');
+    const labelText = input.value.trim() || `Reading ${savedSnapshots.length + 1}`;
+    
+    savedSnapshots.push({
+      id: Date.now(),
+      label: labelText,
+      data: [...currentLiveRTA],
+      color: SNAP_COLORS[savedSnapshots.length % SNAP_COLORS.length]
+    });
+
+    input.value = '';
+    renderSnapshotBadges();
+    updateBandConfig();
+  }
+
+  function removeSnapshot(id) {
+    savedSnapshots = savedSnapshots.filter(s => s.id !== id);
+    renderSnapshotBadges();
+    updateBandConfig();
+  }
+
+  function renderSnapshotBadges() {
+    const container = document.getElementById('snapshotTagsContainer');
+    container.innerHTML = '';
+
+    savedSnapshots.forEach(snap => {
+      const badge = document.createElement('div');
+      badge.className = 'snap-badge';
+      badge.style.borderColor = snap.color;
+      badge.innerHTML = `
+        <span style="color:${snap.color}; font-weight:bold;">●</span> ${snap.label}
+        <span class="remove-btn" onclick="removeSnapshot(${snap.id})">✕</span>
+      `;
+      container.appendChild(badge);
+    });
+  }
+
+  function updateBandConfig() {
+    frameBuffer = [];
+    const freqs = getActiveFreqs();
+    const dummyTarget = getTargetCurve(freqs, document.getElementById('curveSelect').value);
+    
+    // Auto-hide guidance bars when RTA is idle
+    const adjustments = isAnalyzing ? dummyTarget.map((target, i) => Math.round((target - (currentLiveRTA[i] || -20)) * 2) / 2) : [];
+
+    updateChartData(freqs, isAnalyzing ? currentLiveRTA : freqs.map(() => null), dummyTarget, adjustments);
+  }
+
+  function renderSuggestions(freqs, adjustments) {
+    const container = document.getElementById('suggestionsContainer');
+    if (!isAnalyzing) {
+      container.innerHTML = `<p style="color: #7a8b9e; margin:0;">Tap "Start Mic RTA" to enable real-time coaching.</p>`;
+      return;
+    }
+
+    container.innerHTML = '';
+    let activeCount = 0;
+
+    adjustments.forEach((adj, idx) => {
+      if (Math.abs(adj) >= 2.0) {
+        activeCount++;
+        const freqLabel = formatFreq(freqs[idx]);
+        const isCut = adj < 0;
+        const actionText = isCut ? 'CUT' : 'BOOST';
+        const cardClass = isCut ? 'cut' : 'boost';
+
+        let reason = '';
+        if (freqs[idx] <= 250 && isCut) reason = 'Excess room resonance';
+        else if (freqs[idx] <= 250 && !isCut) reason = 'Low-end energy deficit';
+        else if (freqs[idx] >= 2000 && freqs[idx] <= 5000 && isCut) reason = 'System harshness';
+        else if (freqs[idx] >= 6300 && !isCut) reason = 'High-end roll-off';
+        else reason = 'Deviating from target curve';
+
+        const card = document.createElement('div');
+        card.className = `suggestion-card ${cardClass}`;
+        card.innerHTML = `
+          <div>
+            <span class="freq-tag">${freqLabel}</span>
+            <span class="db-change">${adj > 0 ? '+' : ''}${adj} dB</span>
+          </div>
+          <div style="margin-top: 3px;">Move Fader: <strong>${actionText} ${Math.abs(adj)} dB</strong></div>
+          <div class="note">${reason}</div>
+        `;
+        container.appendChild(card);
+      }
+    });
+
+    if (activeCount === 0) {
+      container.innerHTML = `<p style="color: var(--accent); margin:0;">System matched to target within ±2.0 dB.</p>`;
+    }
+  }
+
+  function initChart() {
+    const ctx = document.getElementById('eqChart').getContext('2d');
+    
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: []
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        scales: {
+          y: {
+            min: -20,
+            max: 20,
+            grid: { color: '#2e353f' },
+            ticks: { color: '#e0e6ed', font: { size: 10 } }
+          },
+          x: {
+            grid: { color: '#2e353f' },
+            ticks: { color: '#e0e6ed', font: { size: 9 } }
+          }
+        },
+        plugins: {
+          legend: { labels: { color: '#e0e6ed', font: { size: 10 } } }
+        }
+      }
+    });
+  }
+
+  function updateChartData(freqs, measured, target, adjustments) {
+    if (!chart) return;
+
+    chart.data.labels = freqs.map(formatFreq);
+    const showBars = document.getElementById('showBarsToggle').checked && isAnalyzing;
+    
+    const baseDatasets = [];
+
+    if (isAnalyzing) {
+      baseDatasets.push({
+        label: 'Live Mic RTA',
+        data: measured,
+        borderColor: '#f14668',
+        borderWidth: 2,
+        tension: 0.1,
+        fill: false
+      });
+    }
+
+    baseDatasets.push({
+      label: 'Target Curve',
+      data: target,
+      borderColor: '#00d1b2',
+      borderWidth: 2,
+      borderDash: [4, 4],
+      tension: 0.1,
+      fill: false
+    });
+
+    if (showBars && adjustments.length) {
+      baseDatasets.push({
+        label: 'Hardware Move',
+        data: adjustments,
+        borderColor: '#ffdd57',
+        backgroundColor: 'rgba(255, 221, 87, 0.25)',
+        borderWidth: 1,
+        type: 'bar'
+      });
+    }
+
+    const snapshotDatasets = savedSnapshots.map(snap => ({
+      label: snap.label,
+      data: snap.data,
+      borderColor: snap.color,
+      borderWidth: 2,
+      borderDash: [2, 2],
+      tension: 0.1,
+      fill: false,
+      type: 'line'
+    }));
+
+    chart.data.datasets = [...baseDatasets, ...snapshotDatasets];
+    chart.update('none');
+  }
+
+  window.onload = () => {
+    initChart();
+    
+    document.getElementById('pinkBtn').addEventListener('click', togglePinkNoise);
+    document.getElementById('micBtn').addEventListener('click', toggleMicrophone);
+    document.getElementById('snapBtn').addEventListener('click', saveSnapshot);
+    document.getElementById('eqSelect').addEventListener('change', updateBandConfig);
+    document.getElementById('curveSelect').addEventListener('change', updateBandConfig);
+    document.getElementById('showBarsToggle').addEventListener('change', updateBandConfig);
+    document.getElementById('smoothSelect').addEventListener('change', () => { frameBuffer = []; });
+    
+    updateBandConfig();
+  };
+</script>
+</body>
+</html>
