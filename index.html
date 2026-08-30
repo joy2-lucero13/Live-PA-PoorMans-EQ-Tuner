@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Live PA Sound Tech Coach - Optimized RTA</title>
+  <title>Live PA Sound Tech Coach - Device Selection</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root {
@@ -39,11 +39,7 @@
       align-items: center;
     }
 
-    h1 {
-      margin: 0;
-      font-size: 1.2rem;
-      color: var(--accent);
-    }
+    h1 { margin: 0; font-size: 1.2rem; color: var(--accent); }
 
     .status-badge {
       font-size: 0.75rem;
@@ -58,7 +54,7 @@
 
     .controls-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
       gap: 10px;
       margin-bottom: 15px;
     }
@@ -188,12 +184,26 @@
 
   <div class="controls-grid">
     <div class="control-card">
-      <label>Device 1: Output</label>
+      <label for="micSelect">🎤 Microphone Input</label>
+      <select id="micSelect">
+        <option value="">Default Input</option>
+      </select>
+    </div>
+
+    <div class="control-card">
+      <label for="speakerSelect">🔊 Speaker Output</label>
+      <select id="speakerSelect">
+        <option value="">Default Output</option>
+      </select>
+    </div>
+
+    <div class="control-card">
+      <label>Pink Noise Output</label>
       <button id="pinkBtn" class="pink">Play Pink Noise</button>
     </div>
 
     <div class="control-card">
-      <label>Device 2: Input</label>
+      <label>RTA Spectrum</label>
       <button id="micBtn" class="primary">Start Mic RTA</button>
     </div>
 
@@ -279,7 +289,47 @@
     return document.getElementById('eqSelect').value === '231' ? ISO_31_BANDS : ISO_15_BANDS;
   }
 
-  function togglePinkNoise() {
+  // Populate Input and Output Hardware Selectors
+  async function populateAudioDevices() {
+    try {
+      // Request temporary permission to read hardware labels
+      const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      tempStream.getTracks().forEach(track => track.stop());
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const micSelect = document.getElementById('micSelect');
+      const speakerSelect = document.getElementById('speakerSelect');
+
+      micSelect.innerHTML = '';
+      speakerSelect.innerHTML = '';
+
+      let micCount = 0;
+      let speakerCount = 0;
+
+      devices.forEach(device => {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+
+        if (device.kind === 'audioinput') {
+          micCount++;
+          option.text = device.label || `Microphone ${micCount}`;
+          micSelect.appendChild(option);
+        } else if (device.kind === 'audiooutput') {
+          speakerCount++;
+          option.text = device.label || `Speaker ${speakerCount}`;
+          speakerSelect.appendChild(option);
+        }
+      });
+
+      if (micCount === 0) micSelect.innerHTML = '<option value="">Default Input</option>';
+      if (speakerCount === 0) speakerSelect.innerHTML = '<option value="">Default Output</option>';
+
+    } catch (err) {
+      console.warn('Device enumeration failed or permission denied:', err);
+    }
+  }
+
+  async function togglePinkNoise() {
     const btn = document.getElementById('pinkBtn');
     const badge = document.getElementById('statusBadge');
 
@@ -298,7 +348,17 @@
 
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     genCtx = new AudioContextClass();
-    if (genCtx.state === 'suspended') genCtx.resume();
+    if (genCtx.state === 'suspended') await genCtx.resume();
+
+    // Set designated speaker output if supported
+    const selectedSpeakerId = document.getElementById('speakerSelect').value;
+    if (selectedSpeakerId && typeof genCtx.setSinkId === 'function') {
+      try {
+        await genCtx.setSinkId(selectedSpeakerId);
+      } catch (e) {
+        console.warn('Unable to set sink ID:', e);
+      }
+    }
 
     const bufferSize = 3 * genCtx.sampleRate;
     const noiseBuffer = genCtx.createBuffer(1, bufferSize, genCtx.sampleRate);
@@ -365,21 +425,18 @@
     }
 
     try {
-      if (!navigator.mediaDevices) navigator.mediaDevices = {};
-      if (!navigator.mediaDevices.getUserMedia) {
-        navigator.mediaDevices.getUserMedia = function(constraints) {
-          const getUserMedia = navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
-          if (!getUserMedia) return Promise.reject(new Error('getUserMedia is not supported'));
-          return new Promise((resolve, reject) => {
-            getUserMedia.call(navigator, constraints, resolve, reject);
-          });
-        };
+      const selectedMicId = document.getElementById('micSelect').value;
+      const audioConstraints = {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      };
+
+      if (selectedMicId) {
+        audioConstraints.deviceId = { exact: selectedMicId };
       }
 
-      micStream = await navigator.mediaDevices.getUserMedia({ 
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }, 
-        video: false 
-      });
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false });
 
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       micCtx = new AudioContextClass();
@@ -460,11 +517,7 @@
     });
 
     const targetCurve = getTargetCurve(freqs, document.getElementById('curveSelect').value);
-    
-    const adjustments = targetCurve.map((target, i) => {
-      const diff = target - currentLiveRTA[i];
-      return Math.round(diff * 2) / 2;
-    });
+    const adjustments = targetCurve.map((target, i) => Math.round((target - currentLiveRTA[i]) * 2) / 2);
 
     updateChartData(freqs, currentLiveRTA, targetCurve, adjustments);
     renderSuggestions(freqs, adjustments);
@@ -479,7 +532,7 @@
     }
 
     if (savedSnapshots.length >= 5) {
-      alert('Maximum 5 snapshots allowed. Please remove one before adding a new reading.');
+      alert('Maximum 5 snapshots allowed.');
       return;
     }
 
@@ -524,8 +577,6 @@
     frameBuffer = [];
     const freqs = getActiveFreqs();
     const dummyTarget = getTargetCurve(freqs, document.getElementById('curveSelect').value);
-    
-    // Auto-hide guidance bars when RTA is idle
     const adjustments = isAnalyzing ? dummyTarget.map((target, i) => Math.round((target - (currentLiveRTA[i] || -20)) * 2) / 2) : [];
 
     updateChartData(freqs, isAnalyzing ? currentLiveRTA : freqs.map(() => null), dummyTarget, adjustments);
@@ -580,29 +631,16 @@
     
     chart = new Chart(ctx, {
       type: 'line',
-      data: {
-        labels: [],
-        datasets: []
-      },
+      data: { labels: [], datasets: [] },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         animation: false,
         scales: {
-          y: {
-            min: -20,
-            max: 20,
-            grid: { color: '#2e353f' },
-            ticks: { color: '#e0e6ed', font: { size: 10 } }
-          },
-          x: {
-            grid: { color: '#2e353f' },
-            ticks: { color: '#e0e6ed', font: { size: 9 } }
-          }
+          y: { min: -20, max: 20, grid: { color: '#2e353f' }, ticks: { color: '#e0e6ed', font: { size: 10 } } },
+          x: { grid: { color: '#2e353f' }, ticks: { color: '#e0e6ed', font: { size: 9 } } }
         },
-        plugins: {
-          legend: { labels: { color: '#e0e6ed', font: { size: 10 } } }
-        }
+        plugins: { legend: { labels: { color: '#e0e6ed', font: { size: 10 } } } }
       }
     });
   }
@@ -612,7 +650,6 @@
 
     chart.data.labels = freqs.map(formatFreq);
     const showBars = document.getElementById('showBarsToggle').checked && isAnalyzing;
-    
     const baseDatasets = [];
 
     if (isAnalyzing) {
@@ -662,8 +699,9 @@
     chart.update('none');
   }
 
-  window.onload = () => {
+  window.onload = async () => {
     initChart();
+    await populateAudioDevices();
     
     document.getElementById('pinkBtn').addEventListener('click', togglePinkNoise);
     document.getElementById('micBtn').addEventListener('click', toggleMicrophone);
@@ -673,6 +711,14 @@
     document.getElementById('showBarsToggle').addEventListener('change', updateBandConfig);
     document.getElementById('smoothSelect').addEventListener('change', () => { frameBuffer = []; });
     
+    // Automatically switch inputs if changed during active stream
+    document.getElementById('micSelect').addEventListener('change', async () => {
+      if (isAnalyzing) {
+        stopMicrophone();
+        await toggleMicrophone();
+      }
+    });
+
     updateBandConfig();
   };
 </script>
