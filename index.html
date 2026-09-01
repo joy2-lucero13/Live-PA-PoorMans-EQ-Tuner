@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
-  <title>Live PA Sound Tech Coach - Device Selection</title>
+  <title>Live PA Sound Tech Coach - High SPL Mode</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root {
@@ -73,9 +73,9 @@
       color: #9aa8b6;
     }
 
-    select, button, input[type="text"] {
+    select, button, input[type="text"], input[type="range"] {
       width: 100%;
-      padding: 10px;
+      padding: 8px;
       background: #14171c;
       border: 1px solid var(--border);
       color: var(--text);
@@ -185,16 +185,12 @@
   <div class="controls-grid">
     <div class="control-card">
       <label for="micSelect">🎤 Microphone Input</label>
-      <select id="micSelect">
-        <option value="">Default Input</option>
-      </select>
+      <select id="micSelect"><option value="">Default Input</option></select>
     </div>
 
     <div class="control-card">
       <label for="speakerSelect">🔊 Speaker Output</label>
-      <select id="speakerSelect">
-        <option value="">Default Output</option>
-      </select>
+      <select id="speakerSelect"><option value="">Default Output</option></select>
     </div>
 
     <div class="control-card">
@@ -205,6 +201,11 @@
     <div class="control-card">
       <label>RTA Spectrum</label>
       <button id="micBtn" class="primary">Start Mic RTA</button>
+    </div>
+
+    <div class="control-card">
+      <label for="trimRange">Input Pad Trim: <span id="trimVal">0 dB</span></label>
+      <input type="range" id="trimRange" min="-30" max="10" value="0" step="1">
     </div>
 
     <div class="control-card">
@@ -289,10 +290,8 @@
     return document.getElementById('eqSelect').value === '231' ? ISO_31_BANDS : ISO_15_BANDS;
   }
 
-  // Populate Input and Output Hardware Selectors
   async function populateAudioDevices() {
     try {
-      // Request temporary permission to read hardware labels
       const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       tempStream.getTracks().forEach(track => track.stop());
 
@@ -303,8 +302,7 @@
       micSelect.innerHTML = '';
       speakerSelect.innerHTML = '';
 
-      let micCount = 0;
-      let speakerCount = 0;
+      let micCount = 0, speakerCount = 0;
 
       devices.forEach(device => {
         const option = document.createElement('option');
@@ -323,9 +321,8 @@
 
       if (micCount === 0) micSelect.innerHTML = '<option value="">Default Input</option>';
       if (speakerCount === 0) speakerSelect.innerHTML = '<option value="">Default Output</option>';
-
     } catch (err) {
-      console.warn('Device enumeration failed or permission denied:', err);
+      console.warn('Device enumeration failed:', err);
     }
   }
 
@@ -350,14 +347,9 @@
     genCtx = new AudioContextClass();
     if (genCtx.state === 'suspended') await genCtx.resume();
 
-    // Set designated speaker output if supported
     const selectedSpeakerId = document.getElementById('speakerSelect').value;
     if (selectedSpeakerId && typeof genCtx.setSinkId === 'function') {
-      try {
-        await genCtx.setSinkId(selectedSpeakerId);
-      } catch (e) {
-        console.warn('Unable to set sink ID:', e);
-      }
+      try { await genCtx.setSinkId(selectedSpeakerId); } catch (e) { console.warn('setSinkId failed:', e); }
     }
 
     const bufferSize = 3 * genCtx.sampleRate;
@@ -426,15 +418,8 @@
 
     try {
       const selectedMicId = document.getElementById('micSelect').value;
-      const audioConstraints = {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false
-      };
-
-      if (selectedMicId) {
-        audioConstraints.deviceId = { exact: selectedMicId };
-      }
+      const audioConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+      if (selectedMicId) audioConstraints.deviceId = { exact: selectedMicId };
 
       micStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false });
 
@@ -479,6 +464,7 @@
 
     const sampleRate = micCtx.sampleRate;
     const binWidth = sampleRate / analyser.fftSize;
+    const trimDb = parseFloat(document.getElementById('trimRange').value);
 
     const rawFrame = freqs.map(centerFreq => {
       const bandwidthRatio = document.getElementById('eqSelect').value === '231' ? 0.23 : 0.46;
@@ -497,8 +483,9 @@
       }
 
       const avgPower = count > 0 ? sumPower / count : 1e-12;
-      let dbVal = 10 * Math.log10(avgPower) + 80;
-      return Math.max(-20, Math.min(20, dbVal));
+      // Added trimDb offset to prevent high SPL clipping
+      let dbVal = (10 * Math.log10(avgPower) + 80) + trimDb;
+      return Math.max(-40, Math.min(40, dbVal));
     });
 
     const maxHistoryFrames = parseInt(document.getElementById('smoothSelect').value, 10);
@@ -577,7 +564,7 @@
     frameBuffer = [];
     const freqs = getActiveFreqs();
     const dummyTarget = getTargetCurve(freqs, document.getElementById('curveSelect').value);
-    const adjustments = isAnalyzing ? dummyTarget.map((target, i) => Math.round((target - (currentLiveRTA[i] || -20)) * 2) / 2) : [];
+    const adjustments = isAnalyzing ? dummyTarget.map((target, i) => Math.round((target - (currentLiveRTA[i] || -40)) * 2) / 2) : [];
 
     updateChartData(freqs, isAnalyzing ? currentLiveRTA : freqs.map(() => null), dummyTarget, adjustments);
   }
@@ -637,7 +624,12 @@
         maintainAspectRatio: false,
         animation: false,
         scales: {
-          y: { min: -20, max: 20, grid: { color: '#2e353f' }, ticks: { color: '#e0e6ed', font: { size: 10 } } },
+          y: { 
+            min: -40, // Expanded scale from -20 to -40
+            max: 40,  // Expanded scale from +20 to +40
+            grid: { color: '#2e353f' }, 
+            ticks: { color: '#e0e6ed', font: { size: 10 } } 
+          },
           x: { grid: { color: '#2e353f' }, ticks: { color: '#e0e6ed', font: { size: 9 } } }
         },
         plugins: { legend: { labels: { color: '#e0e6ed', font: { size: 10 } } } }
@@ -711,7 +703,11 @@
     document.getElementById('showBarsToggle').addEventListener('change', updateBandConfig);
     document.getElementById('smoothSelect').addEventListener('change', () => { frameBuffer = []; });
     
-    // Automatically switch inputs if changed during active stream
+    const trimSlider = document.getElementById('trimRange');
+    trimSlider.addEventListener('input', (e) => {
+      document.getElementById('trimVal').innerText = `${e.target.value} dB`;
+    });
+
     document.getElementById('micSelect').addEventListener('change', async () => {
       if (isAnalyzing) {
         stopMicrophone();
